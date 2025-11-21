@@ -1,0 +1,11 @@
+CLIENTE                                                 SERVIDOR
+gen P,G,a
+calc A
+|-----------------------------------------------------------> P,G,A
+                                                            gen b
+                                                            calc B
+                                                            calc K
+                                                            deriv K -> AES key
+B <-----------------------------------------------------------|
+calc K
+deriv K -> AES key
