@@ -12,16 +12,35 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
-func DesafioA() {
-	fmt.Println("--- Desafio A: Quebrando Resistência a Colisão ---")
+func getSHAKE128(input string, outputSize int) []byte {
+	// crio um buffer para armazenar o resultado
+	hash := make([]byte, outputSize)
+	// crio um "shake"
+	d := sha3.NewShake128()
+	// shake processa o input
+	d.Write([]byte(input))
+	// copio o resultado do shake no buffer
+	d.Read(hash)
+	// retorno o buffer
+	return hash
+}
 
+// RESISTÊNCIA A COLISÃO
+func DesafioA() {
+	fmt.Println("--- Desafio A ---")
+	// crio um map
 	seen := make(map[string]string)
+	// crio o mutex
 	var mu sync.Mutex
+
 	var i int64 = 0
-	found := make(chan bool)
+	// crio um context
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// crio um canal
+	done := make(chan bool)
 
+	// cria um thread pool
 	for w := 0; w < runtime.NumCPU(); w++ {
 		go func() {
 			for {
@@ -29,48 +48,53 @@ func DesafioA() {
 				case <-ctx.Done():
 					return
 				default:
-					currentI := atomic.AddInt64(&i, 1)
-					input := fmt.Sprintf("seed_%d", currentI)
+					// pega um i para cada seed
+					valI := atomic.AddInt64(&i, 1)
+					// gera o input do shake
+					input := fmt.Sprintf("col_seed_%d", valI)
+					// pega a saida do shake e faz um encode para string
+					hash := hex.EncodeToString(getSHAKE128(input, 4))
 
-					d := sha3.NewShake128()
-					d.Write([]byte(input))
-					hashBytes := make([]byte, 4)
-					d.Read(hashBytes)
-					hash := hex.EncodeToString(hashBytes)
-
+					// loca a thread, map não é thread safe
 					mu.Lock()
-					if val, exists := seen[hash]; exists {
-						fmt.Printf("Colisão encontrada!\nInput 1: %s\nInput 2: %s\nHash: %s\n\n", val, input, hash)
+					if original, exists := seen[hash]; exists {
+						// se der bom:
+
+						// printo o resultado
+						fmt.Printf("Colisão encontrada!\nInput 1: %s\nInput 2: %s\nHash: %s\n\n", original, input, hash)
+						// cancelo o context
 						cancel()
+						// unlock na thared
 						mu.Unlock()
-						found <- true
+						// sinalizo as thareads que deu bom
+						done <- true
+						// saio da go func
 						return
 					}
 					seen[hash] = input
+					// faz o unlock da thread
 					mu.Unlock()
 				}
 			}
 		}()
 	}
-	<-found
+	// sincronizar as threads
+	<-done
 }
 
+// SEGUNDA PRÉ-IMAGEM
 func DesafioB(nomeCompleto string) {
-	fmt.Println("--- Desafio B: Quebrando Segunda Pré-imagem ---")
-
+	fmt.Println("--- Desafio B ---")
 	x1 := "Aluno: " + nomeCompleto
-	d1 := sha3.NewShake128()
-	d1.Write([]byte(x1))
-	targetHash := make([]byte, 4)
-	d1.Read(targetHash)
-	targetHex := hex.EncodeToString(targetHash)
+	// gero o hash alvo
+	targetHash := hex.EncodeToString(getSHAKE128(x1, 4))
+	fmt.Printf("Alvo (x1): %s | Hash: %s\n", x1, targetHash)
 
-	fmt.Printf("Alvo (x1): %s | Hash Alvo: %s\n", x1, targetHex)
-
+	// mesmo passo do desafio A
 	var i int64 = 0
-	found := make(chan bool)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	done := make(chan bool)
 
 	for w := 0; w < runtime.NumCPU(); w++ {
 		go func() {
@@ -79,96 +103,104 @@ func DesafioB(nomeCompleto string) {
 				case <-ctx.Done():
 					return
 				default:
-					currentI := atomic.AddInt64(&i, 1)
-					x2 := fmt.Sprintf("nonce_%d", currentI)
-
+					valI := atomic.AddInt64(&i, 1)
+					x2 := fmt.Sprintf("nonce_%d", valI)
+					// caso forema  mesma saida eu pulo a interação
 					if x2 == x1 {
 						continue
 					}
 
-					d2 := sha3.NewShake128()
-					d2.Write([]byte(x2))
-					h2 := make([]byte, 4)
-					d2.Read(h2)
-
-					if hex.EncodeToString(h2) == targetHex {
-						fmt.Printf("Segunda pré-imagem encontrada!\nInput (x2): %s\nHash: %s\n\n", x2, targetHex)
+					// vejo se achei o hash alvo
+					if hex.EncodeToString(getSHAKE128(x2, 4)) == targetHash {
+						fmt.Printf("Segunda pré-imagem encontrada!\nInput: %s\nHash: %s\n\n", x2, targetHash)
 						cancel()
-						found <- true
+						done <- true
 						return
 					}
 				}
 			}
 		}()
 	}
-	<-found
+	<-done
 }
 
-// getSHAKE128 gera o hash SHAKE128 com o tamanho solicitado [cite: 5, 13]
-func getSHAKE128(input string, outputSize int) []byte {
-	hash := make([]byte, outputSize)
-	d := sha3.NewShake128()
-	d.Write([]byte(input))
-	d.Read(hash)
-	return hash
-}
+// PRÉ-IMAGEM 34 BITS
+func DesafioC(targetHex string) {
+	fmt.Printf("--- Desafio C ---\n")
 
-func desafioC(targetHex string) {
-	fmt.Printf("--- Desafio C: Quebrando Pré-imagem para %s (34 bits) ---\n", targetHex)
-
-	targetBytes, _ := hex.DecodeString(targetHex + "0")
-	targetValue := uint64(targetBytes[0])<<32 | uint64(targetBytes[1])<<24 | uint64(targetBytes[2])<<16 | uint64(targetBytes[3])<<8 | uint64(targetBytes[4])
-
-	mask := uint64(0xFFFFFFFFF0)
-	targetValue &= mask
-
-	numCPU := runtime.NumCPU()
-	fmt.Printf("Utilizando %d núcleos do processador...\n", numCPU)
-
+	var i int64 = 0
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	done := make(chan bool)
 
-	var wg sync.WaitGroup
-	var foundCounter int32
-	var totalAttempts uint64
-
-	for i := 0; i < numCPU; i++ {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-			for j := uint64(workerID); ; j += uint64(numCPU) {
+	for w := 0; w < runtime.NumCPU(); w++ {
+		go func() {
+			for {
 				select {
 				case <-ctx.Done():
 					return
 				default:
-					input := fmt.Sprintf("pass_%d", j)
+					valI := atomic.AddInt64(&i, 1)
+					input := fmt.Sprintf("pwd_%d", valI)
+					// gera o hash de 40 bits (5 bytes)
 					hash := getSHAKE128(input, 5)
 
-					currentVal := uint64(hash[0])<<32 | uint64(hash[1])<<24 | uint64(hash[2])<<16 | uint64(hash[3])<<8 | uint64(hash[4])
-
-					if (currentVal & mask) == targetValue {
-						if atomic.CompareAndSwapInt32(&foundCounter, 0, 1) {
-							fmt.Printf("\n[Worker %d] SUCESSO!\n", workerID)
-							fmt.Printf("Input encontrado: %s\n", input)
-							fmt.Printf("Hash (Hex): %s\n", strings.ToUpper(hex.EncodeToString(hash)))
-							cancel() // Para todos os outros workers
-						}
+					hashHex := strings.ToUpper(hex.EncodeToString(hash))
+					// olha se target é prefixo do hash
+					if strings.HasPrefix(hashHex, targetHex) {
+						fmt.Printf("Pré-imagem encontrada!\nSenha: %s\nHash: %s\n\n", input, hashHex)
+						cancel()
+						done <- true
 						return
-					}
-
-					if j%1000000 == 0 {
-						atomic.AddUint64(&totalAttempts, 1000000)
 					}
 				}
 			}
-		}(i)
+		}()
 	}
-
-	wg.Wait()
+	<-done
 }
 
 func main() {
-	DesafioA()
-	DesafioB("Aluno: Luiz Guilherme Moreira Leite")
-	desafioC("17675FC0")
+	// DesafioA()
+	// DesafioB("Luiz Guilherme Moreira Leite")
+	// DesafioC("17675FC0")
+
+	fmt.Println("Test 1")
+	fmt.Printf("1: %v\n2: %v\nhash1: %v\nhash2: %v\n",
+		"col_seed_19075",
+		"col_seed_67494",
+		hex.EncodeToString(getSHAKE128("col_seed_19075", 4)),
+		hex.EncodeToString(getSHAKE128("col_seed_67494", 4)))
+
+	fmt.Println("Test 2")
+	fmt.Printf("1: %v\n2: %v\nhash1: %v\nhash2: %v\n",
+		"Aluno: Luiz Guilherme Moreira Leite",
+		"nonce_575534485",
+		hex.EncodeToString(getSHAKE128("Aluno: Luiz Guilherme Moreira Leite", 4)),
+		hex.EncodeToString(getSHAKE128("nonce_575534485", 4)))
+
+	fmt.Println("Test 3")
+	fmt.Printf("1: %v\nhash1: %v\nhash2: %v\n",
+		"pwd_731269163",
+		"17675FC0",
+		hex.EncodeToString(getSHAKE128("pwd_731269163", 4)))
 }
+
+/*
+--- Desafio A ---
+Colisão encontrada!
+Input 1: col_seed_19075
+Input 2: col_seed_67494
+Hash: c903f0c2
+
+--- Desafio B ---
+Alvo (x1): Aluno: Luiz Guilherme Moreira Leite | Hash: 9627ddc0
+Segunda pré-imagem encontrada!
+Input: nonce_575534485
+Hash: 9627ddc0
+
+--- Desafio C ---
+Pré-imagem encontrada!
+Senha: pwd_731269163
+Hash: 17675FC03D
+*/
