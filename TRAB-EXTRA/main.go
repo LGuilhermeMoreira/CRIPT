@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"flag"
 	"fmt"
 	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/crypto/sha3"
 )
@@ -125,7 +127,7 @@ func DesafioB(nomeCompleto string) {
 }
 
 // PRÉ-IMAGEM 34 BITS
-func DesafioC(targetHex string) {
+func DesafioC(targetHex string, targetBytes int) {
 	fmt.Printf("--- Desafio C ---\n")
 
 	var i int64 = 0
@@ -142,12 +144,11 @@ func DesafioC(targetHex string) {
 				default:
 					valI := atomic.AddInt64(&i, 1)
 					input := fmt.Sprintf("pwd_%d", valI)
-					// gera o hash de 40 bits (5 bytes)
-					hash := getSHAKE128(input, 5)
+
+					hash := getSHAKE128(input, targetBytes)
 
 					hashHex := strings.ToUpper(hex.EncodeToString(hash))
-					// olha se target é prefixo do hash
-					if strings.HasPrefix(hashHex, targetHex) {
+					if hashHex == targetHex {
 						fmt.Printf("Pré-imagem encontrada!\nSenha: %s\nHash: %s\n\n", input, hashHex)
 						cancel()
 						done <- true
@@ -160,11 +161,7 @@ func DesafioC(targetHex string) {
 	<-done
 }
 
-func main() {
-	// DesafioA()
-	// DesafioB("Luiz Guilherme Moreira Leite")
-	// DesafioC("17675FC0")
-
+func runTests() {
 	fmt.Println("Test 1")
 	fmt.Printf("1: %v\n2: %v\nhash1: %v\nhash2: %v\n",
 		"col_seed_19075",
@@ -184,6 +181,23 @@ func main() {
 		"pwd_731269163",
 		"17675FC0",
 		hex.EncodeToString(getSHAKE128("pwd_731269163", 4)))
+}
+
+func main() {
+	testes := flag.Bool("testes", false, "Roda os testes")
+	flag.Parse()
+
+	if *testes {
+		runTests()
+	} else {
+		t1 := time.Now()
+		DesafioA()
+		DesafioB("Luiz Guilherme Moreira Leite")
+		DesafioC("17675FC0", 4)
+		t2 := time.Now()
+		fmt.Printf("Tempo total de execução: %v\n", t2.Sub(t1))
+	}
+
 }
 
 /*
